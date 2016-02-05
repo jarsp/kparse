@@ -31,6 +31,7 @@ module P-INTERNAL-SYNTAX
     syntax ProcessDescriptor ::= "nextDescriptor"
 
     syntax NonTerminalCall ::= nonTerminalCall(Int)
+                             | "enqueueAlternates"
     syntax AlternateCall ::= "alternateCall"
     syntax AlternateCallProcess ::= alternateCallProcess(Map)
 
@@ -69,12 +70,18 @@ module P
     </T>
 
     /* Initialization */
+    // TODO: Work out how to recombine alternates
     rule <k> initParser => .K ... </k>
-         <parser> _ => 0 |-> (0 |-> (entryState 
-                                     ~> primitiveState("a")
-                                     ~> ruleWrapLabel("#token")
-                                     ~> exitState)
-                             ) 
+         <parser> _ => (0 |-> ((-1 |-> (entryState
+                                    ~> enqueueAlternates
+                                    ~> nextDescriptor
+                                    ~> exitState))
+                               ( 0 |-> (entryState 
+                                    ~> primitiveState("a")
+                                    ~> ruleWrapLabel("#token")
+                                    ~> exitState))
+                              )
+                       )
          </parser>
 
     // Desc |-> 1-level Context |-> Set of possible asts
@@ -84,7 +91,7 @@ module P
                            <- (.List |-> SetItem(.List))] </asts>
 
     /* Main Loop */
-    rule <k> nextDescriptor => nonTerminalCall(size(As) +Int -1) ... </k>
+    rule <k> nextDescriptor => nonTerminalCall(size(As) +Int -2) ... </k>
          <desc> _ => call(desc(B, E, nt(C, -1)), NT_P) </desc>
          <queue> ListItem(call(desc(B, E, nt(C, -1)), NT_P)) => .List ... </queue>
          <parser> ... C |-> As:Map ... </parser>
