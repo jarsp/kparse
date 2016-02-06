@@ -30,8 +30,10 @@ module P-INTERNAL-SYNTAX
     
     syntax ProcessDescriptor ::= "nextDescriptor"
 
-    syntax NonTerminalCall ::= nonTerminalCall(Int)
+    syntax NonTerminalCall ::= "nonTerminalCall"
                              | "enqueueAlternates"
+                             | enqueueAlternatesLoop(Int)
+                             | nonTerminalCallProcess(Map)
     syntax AlternateCall ::= "alternateCall"
     syntax AlternateCallProcess ::= alternateCallProcess(Map)
 
@@ -91,32 +93,35 @@ module P
                            <- (.List |-> SetItem(.List))] </asts>
 
     /* Main Loop */
-    rule <k> nextDescriptor => nonTerminalCall(size(As) +Int -2) ... </k>
-         <desc> _ => call(desc(B, E, nt(C, -1)), NT_P) </desc>
-         <queue> ListItem(call(desc(B, E, nt(C, -1)), NT_P)) => .List ... </queue>
-         <parser> ... C |-> As:Map ... </parser>
+    rule <k> nextDescriptor => nonTerminalCall ... </k>
+         <desc> _ => D </desc>
+         <queue> ListItem(D:CallDescriptor) => .List ... </queue>
 
-    rule <k> nextDescriptor => alternateCall ... </k>
-         <desc> _ => call(desc(B, E, nt(C, A)), NT_P) </desc>
-         <queue> ListItem(call(desc(B, E, nt(C, A)), NT_P)) => .List ... </queue>
-         requires A =/=Int -1
-
-    // Split into alternates. Pretend the NT call is transparent.
-    rule <k> nonTerminalCall(S:Int => S +Int -1) ... </k>
-         <desc> call(desc(B, E, nt(C, -1)), NT_P) </desc>
-         <queue> ... .List => ListItem(call(desc(B, E, nt(C, S)), NT_P)) </queue>
-         requires S >=Int 0 
-    rule <k> nonTerminalCall(-1) => nextDescriptor ... </k>
-
+    // NT call is not transparent.
     // Whenever we have nested maps there appears to be a lengthy process of extraction.
-    rule <k> alternateCall => alternateCallProcess(M) ... </k>
+    // TODO: Figure out how to copy the previous context when calling nonterminal (not alternate)
+    rule <k> nonTerminalCall => nonTerminalCallProcess(M) ... </k>
          <desc> call(desc(B, E, nt(C, A)), NT_P) </desc>
          <asts> ... (call(desc(B, E, nt(C, -1)), NT_P) |-> F) 
                 (.Map => call(desc(B, E, nt(C, A)), NT_P) |-> F) ... </asts>
          <parser> ... C |-> M ... </parser>
+         requires A =/=Int -1
 
-    rule <k> alternateCallProcess(M:Map) => M[A] ... </k>
+    rule <k> nonTerminalCall => nonTerminalCallProcess(M) ... </k>
+         <desc> call(desc(_, _, nt(C, _)), _) </desc>
+         <parser> ... C |-> M ... </parser>
+
+    rule <k> nonTerminalCallProcess(M:Map) => M[A] ... </k>
          <desc> call(desc(_, _, nt(_, A)), _) </desc>
+
+    rule <k> enqueueAlternates => enqueueAlternatesLoop(size(As) -Int 2) ... </k>
+         <desc> call(desc(_, _, nt(C, -1)), _) </desc>
+         <parser> ... C |-> As:Map ... </parser>
+    
+    rule <k> enqueueAlternatesLoop(I:Int) => enqueueAlternatesLoop(I -Int 1) ... </k>
+         <desc> call(desc(B, E, nt(C, -1)), _) </desc>
+         <queue> .List => ListItem(call(desc(B, E, nt(C, I)), nt(C, -1))) ... </queue>
+    rule enqueueAlternatesLoop(-1) => .K 
 
     /* Entry State */
     rule <k> entryState => entryStateProcessContexts(keys(M)) ... </k>
@@ -167,11 +172,12 @@ module P
     rule <k> exitState => exitStateGetCallers(keys(Rho), .Set) ... </k>
          <asts> Rho:Map </asts>
 
-    rule <k> exitStateGetCallers(Ks:Set SetItem(call(desc(B_OLD, B, NT_C_OLD), NT_Q)), R:Set)
-             => exitStateGetCallers(Ks, R SetItem(call(desc(B_OLD, B, NT_C_OLD), NT_Q))) ... </k>
+    rule <k> exitStateGetCallers(Ks:Set (SetItem(call(desc(B_OLD, B, NT_C_OLD), NT_Q)) => .K), 
+                                 R:Set (.Set => SetItem(call(desc(B_OLD, B, NT_C_OLD), NT_Q)))) ... 
+         </k>
          <desc> call(desc(B, _, NT_C), _) </desc>
-    rule <k> exitStateGetCallers(Ks:Set SetItem(call(desc(_, B_OLD, NT_C_OLD), _)), R:Set)
-             => exitStateGetCallers(Ks, R) ... </k>
+    rule <k> exitStateGetCallers(Ks:Set (SetItem(call(desc(_, B_OLD, NT_C_OLD), _)) => .K),
+                                 R:Set) ... </k>
          <desc> call(desc(B, _, NT_C), _) </desc>
          requires (B_OLD =/=Int B) orBool (NT_C_OLD =/=K NT_C)
     rule exitStateGetCallers(.Set, R:Set) => R
