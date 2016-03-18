@@ -14,17 +14,21 @@ type Queued = S.Set Desc
 type Popped = M.Map Node (S.Set Pos)
 type State = (Desc, Gss, Workq, Queued, Popped)
 
+data Ast = Ast String [Ast] 
+         | Leaf String
+
 -- Parse
 parse :: State -> State
-parse s = (plines ! "LS") s
+parse s = (plines ! "S ::= .S") s
 
 success :: String -> State -> Bool
 success input (_, _, _, u, _) = S.member ("L0", eNode, length input) u
 
 -- Main Loop
 process :: State -> State
-process s@(_, _, [], _, _) = T.trace ("[]") s
-process ((l, _, _), g, q@((l', n', j):r), u, p) = T.trace (show q) goto l' ((l, n', j), g, r, u, p)
+process s@(_, _, [], _, _) = s --T.trace ("[]") s
+process ((l, _, _), g, q@((l', n', j):r), u, p) = goto l' ((l, n', j), g, r, u, p)
+--T.trace (show q) goto l' ((l, n', j), g, r, u, p)
 
 -- Goto a line and execute
 goto :: Line -> State -> State
@@ -76,31 +80,31 @@ iQueued = S.empty
 iPopped = M.empty
 iState = (iDesc, iGss, iWorkq, iQueued, iPopped) :: State
 
-inp = "bbb"
+inp = "aad"
 
 plines :: M.Map String (State -> State)
-plines = M.fromList grammar2'
+plines = M.fromList grammar0
 
 {- 
  - S ::= ASd | BS | ε
  - A ::= a | c
  - B ::= a | b
 -}
-grammar0 = [ ("LS", goto "L0" . enq ("LS3", cu, ci) . enq ("LS2", cu, ci) . enq ("LS1", cu, ci))
+grammar0 = [ ("S ::= .S", goto "L0" . enq ("S ::= .E", cu, ci) . enq ("S ::= .BS", cu, ci) . enq ("S ::= .ASd", cu, ci))
            , ("L0", process)
-           , ("LS1", goto "LA" . create ("L1", cu, ci))
-           , ("L1", goto "LS" . create ("L2", cu, ci))
-           , ("L2", goto "L0" . match "d" inp (pop cu ci) (id))
-           , ("LS2", goto "LB" . create ("L3", cu, ci))
-           , ("L3", goto "LS" . create ("L4", cu, ci))
-           , ("L4", goto "L0" . pop cu ci)
-           , ("LS3", goto "L0" . pop cu ci)
-           , ("LA", goto "L0" . enq ("LA2", cu, ci) . enq ("LA1", cu, ci))
-           , ("LA1", goto "L0" . match "a" inp (pop cu ci) (id))
-           , ("LA2", goto "L0" . match "c" inp (pop cu ci) (id))
-           , ("LB", goto "L0" . enq ("LB2", cu, ci). enq ("LB1", cu, ci))
-           , ("LB1", goto "L0" . match "a" inp (pop cu ci) (id))
-           , ("LB2", goto "L0" . match "b" inp (pop cu ci) (id))
+           , ("S ::= .ASd", goto "A ::= .A" . create ("S ::= A.Sd", cu, ci))
+           , ("S ::= A.Sd", goto "S ::= .S" . create ("S ::= AS.d", cu, ci))
+           , ("S ::= AS.d", goto "L0" . match "d" inp (pop cu ci) (id))
+           , ("S ::= .BS", goto "B ::= .B" . create ("S ::= B.S", cu, ci))
+           , ("S ::= B.S", goto "S ::= .S" . create ("S ::= BS.", cu, ci))
+           , ("S ::= BS.", goto "L0" . pop cu ci)
+           , ("S ::= .E", goto "L0" . pop cu ci)
+           , ("A ::= .A", goto "L0" . enq ("A ::= .c", cu, ci) . enq ("A ::= .a", cu, ci))
+           , ("A ::= .a", goto "L0" . match "a" inp (pop cu ci) (id))
+           , ("A ::= .c", goto "L0" . match "c" inp (pop cu ci) (id))
+           , ("B ::= .B", goto "L0" . enq ("B ::= .b", cu, ci). enq ("B ::= .a", cu, ci))
+           , ("B ::= .a", goto "L0" . match "a" inp (pop cu ci) (id))
+           , ("B ::= .b", goto "L0" . match "b" inp (pop cu ci) (id))
            ]
 
 {-
