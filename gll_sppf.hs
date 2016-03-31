@@ -44,14 +44,14 @@ instance (Display a, Display b) => Display (H.HashMap a b) where
 
 data SPPFNode = Node Symbol Integer Integer
               | Inter Symbol Item Item Integer Integer
-              | Pack Symbol Item Item Integer
+              | Pack Symbol Item Item Integer SPPFNode SPPFNode
               | None
     deriving (Show, Eq, Ord)
 
 instance Display SPPFNode where
     display (Node s i j) = "(" ++ display s ++ ", " ++ show i ++ ", " ++ show j ++ ")"
     display (Inter s a b i j) = "{" ++ display s ++ " ::= " ++ display a ++ "." ++ display b ++ ", " ++ show i ++ ", " ++ show j ++ "}"
-    display (Pack s a b i) = "[" ++ display s ++ " ::= "  ++ display a ++ "." ++ display b ++ ", " ++ show i ++ "]"
+    display (Pack s a b i l r) = "[(" ++ display s ++ " ::= "  ++ display a ++ "." ++ display b ++ ", " ++ show i ++ ") " ++ display l ++ " " ++ display r ++ "]"
     display None = "($)"
 
 instance HS.Hashable SPPFNode where
@@ -62,8 +62,14 @@ instance HS.Hashable SPPFNode where
           Inter x a b i j -> s `HS.hashWithSalt` x `HS.hashWithSalt` 
                              a `HS.hashWithSalt` b `HS.hashWithSalt` 
                              i `HS.hashWithSalt` j
-          Pack x a b i -> s `HS.hashWithSalt` x `HS.hashWithSalt` 
-                          a `HS.hashWithSalt` b `HS.hashWithSalt` i
+          Pack x a b i l r -> if r /= None then 
+                                 s `HS.hashWithSalt` x `HS.hashWithSalt` 
+                                 a `HS.hashWithSalt` b `HS.hashWithSalt`
+                                 i `HS.hashWithSalt` l `HS.hashWithSalt` r
+                              else
+                                 s `HS.hashWithSalt` x `HS.hashWithSalt` 
+                                 a `HS.hashWithSalt` b `HS.hashWithSalt`
+                                 i `HS.hashWithSalt` l
 
 type SPPF = H.HashMap SPPFNode (S.Set SPPFNode)
 
@@ -145,18 +151,17 @@ create (l, t, i, w) ax@(gr, lm) st@(d, r, u, p, g, s) = (st', v)
     where v = (l, i)
           edge = (t, w)
           g' = H.insertWith f v (S.singleton edge) g
-          f _ old = S.insert (t, w) old
+          f _ old = S.insert edge old
           isNew = case H.lookup v g of
                     Just es -> not $ S.member edge es
                     Nothing -> True
           (x, a, b) = lm ! l
-          st' = if isNew
-               then
-                    (d, r, u, p, g', s)
-                else
+          st' = if isNew then
                     case H.lookup v p of
                       Just popped -> S.foldr f' (d, r, u, p, g', s) popped
                       _ -> (d, r, u, p, g', s)
+                else
+                    (d, r, u, p, g', s)
           f' z@(Node _ _ h) sx = add (l, t, h, y) sx'
             where (sx', y) = getNodeP x a b w z ax sx
 
@@ -187,13 +192,10 @@ getNodeP x@(NT _) a b w z@(Node _ k i) (gr, lm) st@(d, r, u, p, g, s) =
                                  ++ show z
                 else
                   t k i
-            pack = Pack x a b k
-            children = if w /= None then S.fromList [w, z] else S.singleton z
+            pack = if w /= None then Pack x a b k w z else Pack x a b k z None
             s' = H.insertWith f y (S.singleton pack) s
             f _ old = S.insert pack old
-            s'' = H.insertWith f' pack children s'
-            f' _ old = old
-         in ((d, r, u, p, g, s''), y)
+         in ((d, r, u, p, g, s'), y)
 getNodeP x a b w z _ _ = error $ show x ++ " " ++ show a ++ " " ++ show b ++ " " ++ show w ++ " " ++ show z ++ "\n"
 
 ------ Parsing Helpers  ------
@@ -321,7 +323,7 @@ g1LS3 inp ax st =
         stfinal = if matchd && matchb then st9 else (if matchd then st5 else st2)
      in g1L0 inp ax stfinal
 
---- G2 ---
+--- G2 --
 
 g2 = H.fromList [(NT "S", S.fromList [[NT "S", T "+", NT "S"],
                                       [NT "S", T "*", NT "S"],
@@ -429,3 +431,77 @@ g2LS3 inp ax st =
         st3 = setCN w1 $ setCI (i + 1) st2
         stfinal = pop (getCU st3) (getCI st3) (getCN st3) ax st3
      in g2L0 inp ax stfinal
+
+--- G3 --
+
+g3 = H.fromList [(NT "S", S.fromList [[NT "S", T "+", NT "S"],
+                                      [T "x"]])
+                ]
+
+g3LMap = H.fromList [("RS1", (NT "S", [NT "S", T "+", NT "S"], [])),
+                     ("L1", (NT "S", [NT "S"], [T "+", NT "S"]))
+                    ]
+
+g3Aux = (g3, g3LMap)
+
+getFuncG3 = flip getFunc g3Func
+
+g3Func = H.fromList [("L0", (g3L0)),
+                     ("LS", (g3LS)),
+                     ("LS1", (g3LS1)),
+                     ("L1", (g3L1)),
+                     ("RS1", (g3RS1)),
+                     ("LS3", (g3LS3))
+                    ]
+
+g3L0 :: ParseFunc
+g3L0 inp ax (d, (r@(l, t, i, w)):rs, u, p, g, s) =
+    (getFuncG3 l) inp ax (r, rs, u, p, g, s)
+g3L0 _ _ s = s
+
+g3LS :: ParseFunc
+g3LS inp ax st = g3L0 inp ax st1
+    where t = getCU st
+          i = getCI st 
+          w = getCN st
+          c = getSym i inp
+          st1 | c == 'x' = add ("LS3", t, i, None) $ add ("LS1", t, i, None) st
+              | otherwise = st
+
+g3LS1 :: ParseFunc
+g3LS1 inp ax st =
+    let (st1, t1) = create (setLabel "L1" $ getDesc st) ax st
+        st2 = setCU t1 st1
+     in g3LS inp ax st2
+
+g3L1 :: ParseFunc
+g3L1 inp ax st = 
+    let i = getCI st
+        (st1, cr) = getNodeT (T "+") i st
+        (st2, w1) = getNodeP (NT "S") [NT "S", T "+"] [NT "S"] (getCN st1) cr ax st1
+        st3 = setCN w1 $ setCI (i + 1) st2
+        (st4, t1) = create (setLabel "RS1" $ getDesc st3) ax st3 
+        st5 = setCU t1 st4
+        matchp = getSym i inp == '+'
+        matchx = getSym (i + 1) inp == 'x'
+        (stfinal, next) = if matchp && matchx then
+                             (st5, (g3LS))
+                          else if matchp then
+                                  (st3, (g3L0))
+                               else 
+                                  (st, (g3L0))
+     in next inp ax stfinal
+
+g3RS1 :: ParseFunc
+g3RS1 inp ax st =
+    let st1 = pop (getCU st) (getCI st) (getCN st) ax st
+     in g3L0 inp ax st1
+
+g3LS3 :: ParseFunc
+g3LS3 inp ax st =
+    let i = getCI st 
+        (st1, cr) = getNodeT (T "x") i st
+        (st2, w1) = getNodeP (NT "S") [T "x"] [] (getCN st1) cr ax st1
+        st3 = setCN w1 $ setCI (i + 1) st2
+        stfinal = pop (getCU st3) (getCI st3) (getCN st3) ax st3
+     in g3L0 inp ax stfinal
