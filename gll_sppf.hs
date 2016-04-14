@@ -62,14 +62,14 @@ instance HS.Hashable SPPFNode where
           Inter x a b i j -> s `HS.hashWithSalt` x `HS.hashWithSalt` 
                              a `HS.hashWithSalt` b `HS.hashWithSalt` 
                              i `HS.hashWithSalt` j
-          Pack x a b i l r -> if r /= None then 
+          Pack x a b i l r -> if l /= None then 
                                  s `HS.hashWithSalt` x `HS.hashWithSalt` 
                                  a `HS.hashWithSalt` b `HS.hashWithSalt`
                                  i `HS.hashWithSalt` l `HS.hashWithSalt` r
                               else
                                  s `HS.hashWithSalt` x `HS.hashWithSalt` 
                                  a `HS.hashWithSalt` b `HS.hashWithSalt`
-                                 i `HS.hashWithSalt` l
+                                 i `HS.hashWithSalt` r
 
 type SPPF = H.HashMap SPPFNode (S.Set SPPFNode)
 
@@ -192,7 +192,7 @@ getNodeP x@(NT _) a b w z@(Node _ k i) (gr, lm) st@(d, r, u, p, g, s) =
                                  ++ show z
                 else
                   t k i
-            pack = if w /= None then Pack x a b k w z else Pack x a b k z None
+            pack = Pack x a b k w z -- w may be None, but not z
             s' = H.insertWith f y (S.singleton pack) s
             f _ old = S.insert pack old
          in ((d, r, u, p, g, s'), y)
@@ -435,11 +435,14 @@ g2LS3 inp ax st =
 --- G3 --
 
 g3 = H.fromList [(NT "S", S.fromList [[NT "S", T "+", NT "S"],
+                                      [NT "S", T "*", NT "S"],
                                       [T "x"]])
                 ]
 
 g3LMap = H.fromList [("RS1", (NT "S", [NT "S", T "+", NT "S"], [])),
-                     ("L1", (NT "S", [NT "S"], [T "+", NT "S"]))
+                     ("RS2", (NT "S", [NT "S", T "*", NT "S"], [])),
+                     ("L1", (NT "S", [NT "S"], [T "+", NT "S"])),
+                     ("L2", (NT "S", [NT "S"], [T "*", NT "S"]))
                     ]
 
 g3Aux = (g3, g3LMap)
@@ -451,31 +454,43 @@ g3Func = H.fromList [("L0", (g3L0)),
                      ("LS1", (g3LS1)),
                      ("L1", (g3L1)),
                      ("RS1", (g3RS1)),
+                     ("LS2", (g3LS2)),
+                     ("L2", (g3L2)),
+                     ("RS2", (g3RS2)),
                      ("LS3", (g3LS3))
                     ]
 
-g3L0 :: ParseFunc
-g3L0 inp ax (d, (r@(l, t, i, w)):rs, u, p, g, s) =
-    (getFuncG3 l) inp ax (r, rs, u, p, g, s)
-g3L0 _ _ s = s
+g3L0 :: String -> ParseFunc
+g3L0 _ inp ax (d, (r@(l, t, i, w)):rs, u, p, g, s) =
+    (getFuncG3 l) "" inp ax (r, rs, u, p, g, s)
+g3L0 _ _ _ s = s
 
-g3LS :: ParseFunc
-g3LS inp ax st = g3L0 inp ax st1
+g3LS :: String -> ParseFunc
+g3LS msg inp ax st = g3L0 "" inp ax st1
     where t = getCU st
           i = getCI st 
           w = getCN st
           c = getSym i inp
-          st1 | c == 'x' = add ("LS3", t, i, None) $ add ("LS1", t, i, None) st
+          st1 | c == 'x' = 
+                    case msg of
+                      "*_l" ->
+                          add ("LS3", t, i, None) $ add ("LS2", t, i, None) st
+                      "*_r" -> 
+                          add ("LS3", t, i, None) st
+                      "+_r" ->
+                          add ("LS3", t, i, None) $ add ("LS2", t, i, None) st
+                      otherwise -> 
+                          add ("LS3", t, i, None) $ add ("LS2", t, i, None) $ add ("LS1", t, i, None) st
               | otherwise = st
 
-g3LS1 :: ParseFunc
-g3LS1 inp ax st =
+g3LS1 :: String -> ParseFunc
+g3LS1 _ inp ax st =
     let (st1, t1) = create (setLabel "L1" $ getDesc st) ax st
         st2 = setCU t1 st1
-     in g3LS inp ax st2
+     in g3LS "+_l" inp ax st2
 
-g3L1 :: ParseFunc
-g3L1 inp ax st = 
+g3L1 :: String -> ParseFunc
+g3L1 _ inp ax st = 
     let i = getCI st
         (st1, cr) = getNodeT (T "+") i st
         (st2, w1) = getNodeP (NT "S") [NT "S", T "+"] [NT "S"] (getCN st1) cr ax st1
@@ -490,18 +505,47 @@ g3L1 inp ax st =
                                   (st3, (g3L0))
                                else 
                                   (st, (g3L0))
-     in next inp ax stfinal
+     in next "+_r" inp ax stfinal
 
-g3RS1 :: ParseFunc
-g3RS1 inp ax st =
+g3RS1 :: String -> ParseFunc
+g3RS1 _ inp ax st =
     let st1 = pop (getCU st) (getCI st) (getCN st) ax st
-     in g3L0 inp ax st1
+     in g3L0 "" inp ax st1
 
-g3LS3 :: ParseFunc
-g3LS3 inp ax st =
+g3LS2 :: String -> ParseFunc
+g3LS2 _ inp ax st =
+    let (st1, t1) = create (setLabel "L2" $ getDesc st) ax st
+        st2 = setCU t1 st1
+     in g3LS "*_l" inp ax st2
+
+g3L2 :: String -> ParseFunc
+g3L2 _ inp ax st = 
+    let i = getCI st
+        (st1, cr) = getNodeT (T "*") i st
+        (st2, w1) = getNodeP (NT "S") [NT "S", T "*"] [NT "S"] (getCN st1) cr ax st1
+        st3 = setCN w1 $ setCI (i + 1) st2
+        (st4, t1) = create (setLabel "RS2" $ getDesc st3) ax st3 
+        st5 = setCU t1 st4
+        matchp = getSym i inp == '*'
+        matchx = getSym (i + 1) inp == 'x'
+        (stfinal, next) = if matchp && matchx then
+                             (st5, (g3LS))
+                          else if matchp then
+                                  (st3, (g3L0))
+                               else
+                                  (st, (g3L0))
+     in next "*_r" inp ax stfinal
+
+g3RS2 :: String -> ParseFunc
+g3RS2 _ inp ax st =
+    let st1 = pop (getCU st) (getCI st) (getCN st) ax st
+     in g3L0 "" inp ax st1
+
+g3LS3 :: String -> ParseFunc
+g3LS3 _ inp ax st =
     let i = getCI st 
         (st1, cr) = getNodeT (T "x") i st
         (st2, w1) = getNodeP (NT "S") [T "x"] [] (getCN st1) cr ax st1
         st3 = setCN w1 $ setCI (i + 1) st2
         stfinal = pop (getCU st3) (getCI st3) (getCN st3) ax st3
-     in g3L0 inp ax stfinal
+     in g3L0 "" inp ax stfinal
