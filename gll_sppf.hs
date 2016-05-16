@@ -215,6 +215,9 @@ isSuccessful inp s =
 getDesc :: State -> Desc
 getDesc (d, _, _, _, _, _) = d
 
+getLabel :: Desc -> String
+getLabel (l, _, _, _) = l
+
 setLabel :: String -> Desc -> Desc
 setLabel l' (_, t, i, w) = (l', t, i, w)
 
@@ -235,6 +238,10 @@ getCN ((_, _, _, w), _, _, _, _, _) = w
 
 setCN :: SPPFNode -> State -> State
 setCN w' ((l, t, i, w), r, u, p, g, s) = ((l, t, i, w'), r, u, p, g, s)
+
+popQueue :: State -> (String, State)
+popQueue (d, r:rs, u, p, g, s) = (getLabel r, (r, rs, u, p, g, s))
+popQueue st = ("", st)
 
 ----- Test Grammars -----
 
@@ -461,9 +468,9 @@ g3Func = H.fromList [("L0", (g3L0)),
                     ]
 
 g3L0 :: String -> ParseFunc
-g3L0 _ inp ax (d, (r@(l, t, i, w)):rs, u, p, g, s) =
-    (getFuncG3 l) "" inp ax (r, rs, u, p, g, s)
-g3L0 _ _ _ s = s
+g3L0 _ inp ax st =
+    let (l, st') = popQueue st
+     in if l /= "" then (getFuncG3 l) "" inp ax st' else st'
 
 g3LS :: String -> ParseFunc
 g3LS msg inp ax st = g3L0 "" inp ax st1

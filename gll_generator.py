@@ -117,16 +117,30 @@ def genSets(g):
 
     return (firsts, follows)
 
+def formatSet(s):
+    tmp = []
+    for nt, vals in s.items():
+        tmp.append('("S",S.fromList ' + formatList(vals) + ')')
+    return "H.fromlist " + formatList(tmp)
+
 def genAlternateSelect(nt, alist, n):
     # nt = nonterminal string
     # alist = [[grammar symbols]] (list of alternates)
-    pre = n + "L" + sep + nt
-
+    base = "L" + sep + nt
+    pre = """\
+{}{} inp ax st = {}L0 inp ax st1
+    where t = getCU st
+          i = getCI st
+          w = getCCN st
+          c = getSym i inp
+"""
 
 name, grammar = readGrammar(sys.argv[1])
 rlist, lmap = genLMap(grammar)
+fst, flw = genSets(grammar)
 print formatGrammar(grammar)
 print formatLMap(lmap)
 print formatFunc(rlist, name)
 print formatL0(name, name + "GetFunc")
-print genSets(grammar)
+print fst, flw
+print formatSet(fst), formatSet(flw)
